@@ -3,9 +3,6 @@ import std/os
 when defined(windows):
   import ./platform/win
 
-const
-  SigInt = 2
-
 type
   RegisterIdx = enum
     rR0 = 0
@@ -130,16 +127,6 @@ proc updateFlags(r: RegisterIdx) =
       flPos
   reg[rCond] = flag
 
-# signal handling
-# https://gist.github.com/dom96/908782#gistcomment-2906627
-
-proc signal*(sig: cint; fn: pointer) {.importc: "signal", header: "<signal.h>".}
-
-template atSignal*(s: cint; actions: untyped): untyped =
-  proc callback(sig: cint) =
-    actions
-  signal(s, callback)
-
 # main
 
 proc main() =
@@ -154,7 +141,7 @@ proc main() =
       quit(1)
     
   # setup
-  atSignal(SigInt):
+  setControlCHook():
     restoreInputBuffering();
     stdout.write('\n');
     quit(-2);
