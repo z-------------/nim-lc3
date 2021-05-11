@@ -11,4 +11,5 @@ bin           = @["lc3"]
 # Dependencies
 
 requires "nim >= 1.4.6"
-requires "winim"
+when defined(windows):
+  requires "winim"
