@@ -89,23 +89,22 @@ proc swap16(x: uint16): uint16 =
   when system.cpuEndian == littleEndian:
     (x shl 8) or (x shr 8)
 
-# TODO: make this more idiomatic
+proc read[T](file: File): T =
+  var x: T
+  discard file.readBuffer(addr x, sizeof T)
+  result = x
+
 proc readImageFile(file: File) =
   # the origin tells us where in memory to place the image
-  var origin: uint16
-  discard file.readBuffer(addr origin, 2)
-  origin = swap16(origin)
+  let origin = swap16(read[uint16](file))
 
   # we know the maximum file size so we only need one read
   let maxRead = uint16.high - origin
   var read = file.readBuffer(addr memory[origin], maxRead * sizeof uint16)
   
   # swap to little endian
-  var i = 0
-  while read > 0:
+  for i in 0..<read:
     memory[origin + i] = swap16(memory[origin + i])
-    inc i
-    dec read
 
 proc readImage(imagePath: string): bool =
   try:
