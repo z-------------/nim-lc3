@@ -2,6 +2,8 @@ import std/os
 
 when defined(windows):
   import ./platform/win
+elif defined(posix):
+  import ./platform/unix
 
 type
   RegisterIdx = enum
