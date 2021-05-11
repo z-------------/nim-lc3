@@ -86,7 +86,8 @@ proc memRead(address: uint16): uint16 =
   memory[address]
 
 proc swap16(x: uint16): uint16 =
-  (x shl 8) or (x shr 8)
+  when system.cpuEndian == littleEndian:
+    (x shl 8) or (x shr 8)
 
 # TODO: make this more idiomatic
 proc readImageFile(file: File) =
