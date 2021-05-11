@@ -8,12 +8,7 @@ var
 proc kbHit(): cint {.header: "<conio.h>", importc: "_kbhit".}
 
 proc checkKey*(): bool =
-  let
-    a = WaitForSingleObject(hStdin, 1000) == WAIT_OBJECT_0
-    b = kbHit() != 0
-  # dump a
-  # dump b
-  a and b
+  WaitForSingleObject(hStdin, 1000) == WAIT_OBJECT_0 and kbHit() != 0
 
 proc disableInputBuffering*() =
   hStdin = GetStdHandle(STD_INPUT_HANDLE)
