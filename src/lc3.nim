@@ -177,14 +177,23 @@ proc handleTrap(instr: uint16) =
 # instruction macro
 
 template ifOp(ops: varargs[Opcode]; body: untyped): untyped =
-  if static(ops.contains(op)):
+  when ops.contains(op):
     body
 
 proc ins[op: static[Opcode]](instr: uint16) =
-  var
-    r0, r1, r2: RegisterIdx
-    imm5, immFlag: uint16
-    pcPlusOff, basePlusOff: uint16
+  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
+    var r0 {.inject.}: RegisterIdx
+  ifOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
+    var r1 {.inject.}: RegisterIdx
+  ifOp(opAdd, opAnd):
+    var
+      r2 {.inject.}: RegisterIdx
+      imm5 {.inject.}: uint16
+      immFlag {.inject.}: uint16
+  ifOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
+    var pcPlusOff {.inject.}: uint16
+  ifOp(opLdr, opStr):
+    var basePlusOff {.inject.}: uint16
   
   ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     r0 = (instr shr 9) and 0x7
