@@ -1,5 +1,6 @@
 import std/os
 import std/macros
+from std/strutils import toHex
 
 when defined(windows):
   import ./platform/win
@@ -327,7 +328,11 @@ proc main() =
       op = Opcode(instr shr 12)
     inc reg[rPC]
 
-    opTable[op.ord](instr)
+    try:
+      opTable[op.ord](instr)
+    except:
+      stderr.writeLine("PC = " & $reg[rPC].toHex)
+      raise
         
   # shutdown
   restoreInputBuffering()
