@@ -65,9 +65,6 @@ converter conditionFlagToUInt16(x: ConditionFlag): uint16 =
 converter intToUInt16(x: int): uint16 =
   x.uint16
 
-# converter uInt16ToBool(x: uint16): bool =
-#   x != 0
-
 # globals
 
 var
