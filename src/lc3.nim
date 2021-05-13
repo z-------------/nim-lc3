@@ -176,8 +176,8 @@ proc handleTrap(instr: uint16) =
 
 # instruction macro
 
-template whenOp(mask: untyped; body: untyped): untyped =
-  if (mask and opBit) != 0:
+template whenOp(ops: varargs[Opcode]; body: untyped): untyped =
+  if ops.contains(op):
     stmtList.add quote do:
       body
 
@@ -199,56 +199,53 @@ macro ins(op: static[Opcode]): untyped =
   )
   var stmtList = newStmtList()
 
-  let opBit: uint16 = 1 shl op.ord
-
-  whenOp(0x4EEE):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     var r0 {.inject.}: RegisterIdx
-  whenOp(0x12F3):
+  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
     var r1 {.inject.}: RegisterIdx
-  whenOp(0x0022):
-    var r2 {.inject.}: RegisterIdx
-  whenOp(0x0022):
+  whenOp(opAdd, opAnd):
     var
+      r2 {.inject.}: RegisterIdx
       imm5 {.inject.}: uint16
       immFlag {.inject.}: uint16
-  whenOp(0x4C1D):
+  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
     var pcPlusOff {.inject.}: uint16
-  whenOp(0x00C0):
+  whenOp(opLdr, opStr):
     var basePlusOff {.inject.}: uint16
   
-  whenOp(0x4EEE):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     r0 = (instr shr 9) and 0x7
-  whenOp(0x12F3):
+  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
     r1 = (instr shr 6) and 0x7
-  whenOp(0x0022):
+  whenOp(opAdd, opAnd):
     immFlag = (instr shr 5) and 0x1
     if immFlag != 0:
       imm5 = signExtend(instr and 0x1F, 5)
     else:
       r2 = instr and 0x7
-  whenOp(0x00C0): # base + offset
+  whenOp(opLdr, opStr): # base + offset
     basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
-  whenOp(0x4C0D): # indirect address
+  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti): # indirect address
     pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
-  whenOp(0x0001): # BR
+  whenOp(opBr): # BR
     let cond: uint16 = (instr shr 9) and 0x7
     if (cond and reg[rCond]) != 0:
       reg[rPC] = pcPlusOff
-  whenOp(0x0002): # ADD
+  whenOp(opAdd): # ADD
     if immFlag != 0:
       reg[r0] = reg[r1] + imm5
     else:
       reg[r0] = reg[r1] + reg[r2]
-  whenOp(0x0020): # AND
+  whenOp(opAnd): # AND
     if immFlag != 0:
       reg[r0] = reg[r1] and imm5
     else:
       reg[r0] = reg[r1] and reg[r2]
-  whenOp(0x0200): # NOT
+  whenOp(opNot): # NOT
     reg[r0] = not reg[r1]
-  whenOp(0x1000): # JMP
+  whenOp(opJmp): # JMP
     reg[rPC] = reg[r1]
-  whenOp(0x0010): # JSR
+  whenOp(opJsr): # JSR
     let longFlag: uint16 = (instr shr 11) and 0x1
     reg[rR7] = reg[rPC]
     if longFlag != 0:
@@ -256,25 +253,25 @@ macro ins(op: static[Opcode]): untyped =
       reg[rPC] = pcPlusOff
     else:
       reg[rPC] = reg[r1]
-  whenOp(0x0004): # LD
+  whenOp(opLd): # LD
     reg[r0] = memRead(pcPlusOff)
-  whenOp(0x0400): # LDI
+  whenOp(opLdi): # LDI
     reg[r0] = memRead(memRead(pcPlusOff))
-  whenOp(0x0040): # LDR
+  whenOp(opLdr): # LDR
     reg[r0] = memRead(basePlusOff)
-  whenOp(0x4000): # LEA
+  whenOp(opLea): # LEA
     reg[r0] = pcPlusOff
-  whenOp(0x0008): # ST
+  whenOp(opSt): # ST
     memWrite(pcPlusOff, reg[r0])
-  whenOp(0x0800): # STI
+  whenOp(opSti): # STI
     memWrite(memRead(pcPlusOff), reg[r0])
-  whenOp(0x0080): # STR
+  whenOp(opStr): # STR
     memWrite(basePlusOff, reg[r0])
-  whenOp(0x8000): # TRAP
+  whenOp(opTrap): # TRAP
     handleTrap(instr)
   # whenOp(0x0100): # RTI
   #   discard
-  whenOp(0x4666):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
     updateFlags(r0)
   
   result.add(stmtList)
