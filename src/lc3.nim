@@ -182,18 +182,18 @@ template whenOp(ops: varargs[Opcode]; body: untyped): untyped =
 
 proc ins[op: static[Opcode]](instr: uint16) =
   whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
-    var r0 {.inject.}: RegisterIdx
+    var r0: RegisterIdx
   whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
-    var r1 {.inject.}: RegisterIdx
+    var r1: RegisterIdx
   whenOp(opAdd, opAnd):
     var
-      r2 {.inject.}: RegisterIdx
-      imm5 {.inject.}: uint16
-      immFlag {.inject.}: uint16
+      r2: RegisterIdx
+      imm5: uint16
+      immFlag: uint16
   whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
-    var pcPlusOff {.inject.}: uint16
+    var pcPlusOff: uint16
   whenOp(opLdr, opStr):
-    var basePlusOff {.inject.}: uint16
+    var basePlusOff: uint16
   
   whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     r0 = (instr shr 9) and 0x7
