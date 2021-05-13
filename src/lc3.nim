@@ -1,5 +1,4 @@
 import std/os
-import std/macros
 from std/strutils import toHex
 
 when defined(windows):
@@ -177,76 +176,49 @@ proc handleTrap(instr: uint16) =
 
 # instruction macro
 
-template whenOp(ops: varargs[Opcode]; body: untyped): untyped =
-  if ops.contains(op):
-    stmtList.add quote do:
-      body
+template ifOp(ops: varargs[Opcode]; body: untyped): untyped =
+  if static(ops.contains(op)):
+    body
 
-macro ins(op: static[Opcode]): untyped =
-  result = nnkLambda.newTree(
-    newEmptyNode(),
-    newEmptyNode(),
-    newEmptyNode(),
-    nnkFormalParams.newTree(
-      newEmptyNode(), # proc return type
-      nnkIdentDefs.newTree(
-        newIdentNode("instr"),
-        newIdentNode("uint16"),
-        newEmptyNode()  # default value
-      )
-    ),
-    newEmptyNode(),
-    newEmptyNode(),
-  )
-  var stmtList = newStmtList()
-
-  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
-    var r0 {.inject.}: RegisterIdx
-  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
-    var r1 {.inject.}: RegisterIdx
-  whenOp(opAdd, opAnd):
-    var
-      r2 {.inject.}: RegisterIdx
-      imm5 {.inject.}: uint16
-      immFlag {.inject.}: uint16
-  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
-    var pcPlusOff {.inject.}: uint16
-  whenOp(opLdr, opStr):
-    var basePlusOff {.inject.}: uint16
+proc ins[op: static[Opcode]](instr: uint16) =
+  var
+    r0, r1, r2: RegisterIdx
+    imm5, immFlag: uint16
+    pcPlusOff, basePlusOff: uint16
   
-  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
+  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     r0 = (instr shr 9) and 0x7
-  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
+  ifOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
     r1 = (instr shr 6) and 0x7
-  whenOp(opAdd, opAnd):
+  ifOp(opAdd, opAnd):
     immFlag = (instr shr 5) and 0x1
     if immFlag != 0:
       imm5 = signExtend(instr and 0x1F, 5)
     else:
       r2 = instr and 0x7
-  whenOp(opLdr, opStr): # base + offset
+  ifOp(opLdr, opStr): # base + offset
     basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
-  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti): # indirect address
+  ifOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti): # indirect address
     pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
-  whenOp(opBr): # BR
+  ifOp(opBr): # BR
     let cond: uint16 = (instr shr 9) and 0x7
     if (cond and reg[rCond]) != 0:
       reg[rPC] = pcPlusOff
-  whenOp(opAdd): # ADD
+  ifOp(opAdd): # ADD
     if immFlag != 0:
       reg[r0] = reg[r1] + imm5
     else:
       reg[r0] = reg[r1] + reg[r2]
-  whenOp(opAnd): # AND
+  ifOp(opAnd): # AND
     if immFlag != 0:
       reg[r0] = reg[r1] and imm5
     else:
       reg[r0] = reg[r1] and reg[r2]
-  whenOp(opNot): # NOT
+  ifOp(opNot): # NOT
     reg[r0] = not reg[r1]
-  whenOp(opJmp): # JMP
+  ifOp(opJmp): # JMP
     reg[rPC] = reg[r1]
-  whenOp(opJsr): # JSR
+  ifOp(opJsr): # JSR
     let longFlag: uint16 = (instr shr 11) and 0x1
     reg[rR7] = reg[rPC]
     if longFlag != 0:
@@ -254,46 +226,44 @@ macro ins(op: static[Opcode]): untyped =
       reg[rPC] = pcPlusOff
     else:
       reg[rPC] = reg[r1]
-  whenOp(opLd): # LD
+  ifOp(opLd): # LD
     reg[r0] = memRead(pcPlusOff)
-  whenOp(opLdi): # LDI
+  ifOp(opLdi): # LDI
     reg[r0] = memRead(memRead(pcPlusOff))
-  whenOp(opLdr): # LDR
+  ifOp(opLdr): # LDR
     reg[r0] = memRead(basePlusOff)
-  whenOp(opLea): # LEA
+  ifOp(opLea): # LEA
     reg[r0] = pcPlusOff
-  whenOp(opSt): # ST
+  ifOp(opSt): # ST
     memWrite(pcPlusOff, reg[r0])
-  whenOp(opSti): # STI
+  ifOp(opSti): # STI
     memWrite(memRead(pcPlusOff), reg[r0])
-  whenOp(opStr): # STR
+  ifOp(opStr): # STR
     memWrite(basePlusOff, reg[r0])
-  whenOp(opTrap): # TRAP
+  ifOp(opTrap): # TRAP
     handleTrap(instr)
-  # whenOp(0x0100): # RTI
+  # ifOp(0x0100): # RTI
   #   discard
-  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
+  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
     updateFlags(r0)
-  
-  result.add(stmtList)
 
 const opTable = [
-  ins(opBr),
-  ins(opAdd),
-  ins(opLd),
-  ins(opSt),
-  ins(opJsr),
-  ins(opAnd),
-  ins(opLdr),
-  ins(opStr),
-  ins(opRti),
-  ins(opNot),
-  ins(opLdi),
-  ins(opSti),
-  ins(opJmp),
-  ins(opRes),
-  ins(opLea),
-  ins(opTrap),
+  ins[opBr],
+  ins[opAdd],
+  ins[opLd],
+  ins[opSt],
+  ins[opJsr],
+  ins[opAnd],
+  ins[opLdr],
+  ins[opStr],
+  ins[opRti],
+  ins[opNot],
+  ins[opLdi],
+  ins[opSti],
+  ins[opJmp],
+  ins[opRes],
+  ins[opLea],
+  ins[opTrap],
 ]
 
 # main
