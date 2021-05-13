@@ -177,6 +177,13 @@ proc handleTrap(instr: uint16) =
     stdout.flushFile()
     running = false
 
+# instruction macro
+
+template whenOp(mask: untyped; body: untyped): untyped =
+  if (mask and opBit) != 0:
+    stmtList.add quote do:
+      body
+
 macro ins(op: static[Opcode]): untyped =
   result = nnkLambda.newTree(
     newEmptyNode(),
@@ -197,111 +204,83 @@ macro ins(op: static[Opcode]): untyped =
 
   let opBit: uint16 = 1 shl op.ord
 
-  stmtList.add(nnkVarSection.newTree(
-    nnkIdentDefs.newTree(
-      newIdentNode("r0"),
-      newIdentNode("r1"),
-      newIdentNode("r2"),
-      newIdentNode("RegisterIdx"),
-      newEmptyNode()
-    ),
-    nnkIdentDefs.newTree(
-      newIdentNode("imm5"),
-      newIdentNode("immFlag"),
-      newIdentNode("uint16"),
-      newEmptyNode()
-    ),
-    nnkIdentDefs.newTree(
-      newIdentNode("pcPlusOff"),
-      newIdentNode("basePlusOff"),
-      newIdentNode("uint16"),
-      newEmptyNode()
-    )
-  ))
+  whenOp(0x4EEE):
+    var r0 {.inject.}: RegisterIdx
+  whenOp(0x12F3):
+    var r1 {.inject.}: RegisterIdx
+  whenOp(0x0022):
+    var r2 {.inject.}: RegisterIdx
+  whenOp(0x0022):
+    var
+      imm5 {.inject.}: uint16
+      immFlag {.inject.}: uint16
+  whenOp(0x4C1D):
+    var pcPlusOff {.inject.}: uint16
+  whenOp(0x00C0):
+    var basePlusOff {.inject.}: uint16
   
-  if (0x4EEE and opBit) != 0:
-    stmtList.add quote do:
-      r0 = (instr shr 9) and 0x7
-  if (0x12F3 and opBit) != 0:
-    stmtList.add quote do:
-      r1 = (instr shr 6) and 0x7
-  if (0x0022 and opBit) != 0:
-    stmtList.add quote do:
-      immFlag = (instr shr 5) and 0x1
-      if immFlag != 0:
-        imm5 = signExtend(instr and 0x1F, 5)
-      else:
-        r2 = instr and 0x7
-  if (0x00C0 and opBit) != 0: # base + offset
-    stmtList.add quote do:
-      basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
-  if (0x4C0D and opBit) != 0: # indirect address
-    stmtList.add quote do:
-      pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
-  if (0x0001 and opBit) != 0: # BR
-    stmtList.add quote do:
-      let cond: uint16 = (instr shr 9) and 0x7
-      if (cond and reg[rCond]) != 0:
-        reg[rPC] = pcPlusOff
-  if (0x0002 and opBit) != 0: # ADD
-    stmtList.add quote do:
-      if immFlag != 0:
-        reg[r0] = reg[r1] + imm5
-      else:
-        reg[r0] = reg[r1] + reg[r2]
-  if (0x0020 and opBit) != 0: # AND
-    stmtList.add quote do:
-      if immFlag != 0:
-        reg[r0] = reg[r1] and imm5
-      else:
-        reg[r0] = reg[r1] and reg[r2]
-  if (0x0200 and opBit) != 0: # NOT
-    stmtList.add quote do:
-      reg[r0] = not reg[r1]
-  if (0x1000 and opBit) != 0: # JMP
-    stmtList.add quote do:
+  whenOp(0x4EEE):
+    r0 = (instr shr 9) and 0x7
+  whenOp(0x12F3):
+    r1 = (instr shr 6) and 0x7
+  whenOp(0x0022):
+    immFlag = (instr shr 5) and 0x1
+    if immFlag != 0:
+      imm5 = signExtend(instr and 0x1F, 5)
+    else:
+      r2 = instr and 0x7
+  whenOp(0x00C0): # base + offset
+    basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
+  whenOp(0x4C0D): # indirect address
+    pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
+  whenOp(0x0001): # BR
+    let cond: uint16 = (instr shr 9) and 0x7
+    if (cond and reg[rCond]) != 0:
+      reg[rPC] = pcPlusOff
+  whenOp(0x0002): # ADD
+    if immFlag != 0:
+      reg[r0] = reg[r1] + imm5
+    else:
+      reg[r0] = reg[r1] + reg[r2]
+  whenOp(0x0020): # AND
+    if immFlag != 0:
+      reg[r0] = reg[r1] and imm5
+    else:
+      reg[r0] = reg[r1] and reg[r2]
+  whenOp(0x0200): # NOT
+    reg[r0] = not reg[r1]
+  whenOp(0x1000): # JMP
+    reg[rPC] = reg[r1]
+  whenOp(0x0010): # JSR
+    let longFlag: uint16 = (instr shr 11) and 0x1
+    reg[rR7] = reg[rPC]
+    if longFlag != 0:
+      pcPlusOff = reg[rPC] + signExtend(instr and 0x7FF, 11)
+      reg[rPC] = pcPlusOff
+    else:
       reg[rPC] = reg[r1]
-  if (0x0010 and opBit) != 0: # JSR
-    stmtList.add quote do:
-      let longFlag: uint16 = (instr shr 11) and 0x1
-      reg[rR7] = reg[rPC]
-      if longFlag != 0:
-        pcPlusOff = reg[rPC] + signExtend(instr and 0x7FF, 11)
-        reg[rPC] = pcPlusOff
-      else:
-        reg[rPC] = reg[r1]
-  if (0x0004 and opBit) != 0:
-    stmtList.add quote do:
-      reg[r0] = memRead(pcPlusOff)  # LD
-  if (0x0400 and opBit) != 0:
-    stmtList.add quote do:
-      reg[r0] = memRead(memRead(pcPlusOff))  # LDI
-  if (0x0040 and opBit) != 0:
-    stmtList.add quote do:
-      reg[r0] = memRead(basePlusOff)  # LDR
-  if (0x4000 and opBit) != 0:
-    stmtList.add quote do:
-      reg[r0] = pcPlusOff  # LEA
-  if (0x0008 and opBit) != 0:
-    stmtList.add quote do:
-      memWrite(pcPlusOff, reg[r0])  # ST
-  if (0x0800 and opBit) != 0:
-    stmtList.add quote do:
-      memWrite(memRead(pcPlusOff), reg[r0])  # STI
-  if (0x0080 and opBit) != 0:
-    stmtList.add quote do:
-      memWrite(basePlusOff, reg[r0])  # STR
-  if (0x8000 and opBit) != 0: # TRAP
-    stmtList.add quote do:
-      handleTrap(instr)
-  # if (0x0100 and opBit) != 0: # RTI
+  whenOp(0x0004): # LD
+    reg[r0] = memRead(pcPlusOff)
+  whenOp(0x0400): # LDI
+    reg[r0] = memRead(memRead(pcPlusOff))
+  whenOp(0x0040): # LDR
+    reg[r0] = memRead(basePlusOff)
+  whenOp(0x4000): # LEA
+    reg[r0] = pcPlusOff
+  whenOp(0x0008): # ST
+    memWrite(pcPlusOff, reg[r0])
+  whenOp(0x0800): # STI
+    memWrite(memRead(pcPlusOff), reg[r0])
+  whenOp(0x0080): # STR
+    memWrite(basePlusOff, reg[r0])
+  whenOp(0x8000): # TRAP
+    handleTrap(instr)
+  # whenOp(0x0100): # RTI
   #   discard
-  if (0x4666 and opBit) != 0:
-    stmtList.add quote do:
-      updateFlags(r0)
+  whenOp(0x4666):
+    updateFlags(r0)
   
   result.add(stmtList)
-  # echo result.repr
 
 const opTable = [
   ins(opBr),
