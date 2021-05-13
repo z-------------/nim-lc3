@@ -1,4 +1,5 @@
 import std/os
+import std/macros
 
 when defined(windows):
   import ./platform/win
@@ -64,11 +65,15 @@ converter conditionFlagToUInt16(x: ConditionFlag): uint16 =
 converter intToUInt16(x: int): uint16 =
   x.uint16
 
+# converter uInt16ToBool(x: uint16): bool =
+#   x != 0
+
 # globals
 
 var
   memory: array[uint16, uint16]
   reg: array[RegisterIdx, uint16]
+  running = true
 
 # helpers
 
@@ -129,6 +134,194 @@ proc updateFlags(r: RegisterIdx) =
       flPos
   reg[rCond] = flag
 
+proc handleTrap(instr: uint16) =
+  let trapCode = Trapcode(instr and 0xFF)
+  case trapCode
+  of trapGetc:
+    reg[rR0] = stdin.readChar().uint16
+
+  of trapOut:
+    stdout.write(reg[rR0].char)
+    stdout.flushFile()
+
+  of trapPuts:
+    # one char per word
+    var p = reg[rR0]
+    while memory[p] != 0:
+      stdout.write(memory[p].char)
+      inc p
+    stdout.flushFile()
+
+  of trapIn:
+    stdout.writeLine("Enter a character: ")
+    let c = stdin.readChar()
+    stdout.write(c)
+    reg[rR0] = c.uint16
+
+  of trapPutsp:
+    # one char per byte (two bytes per word)
+    # here we need to swap back to big endian
+    var p = reg[rR0]
+    while memory[p] != 0:
+      let
+        char1 = (memory[p] and 0xFF).char
+        char2 = (memory[p] shr 8).char
+      stdout.write(char1)
+      if char2 != '\0':
+        stdout.write(char2)
+      inc p
+    stdout.flushFile()
+
+  of trapHalt:
+    stdout.write("HALT")
+    stdout.flushFile()
+    running = false
+
+macro ins(op: static[Opcode]): untyped =
+  result = nnkLambda.newTree(
+    newEmptyNode(),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkFormalParams.newTree(
+      newEmptyNode(), # proc return type
+      nnkIdentDefs.newTree(
+        newIdentNode("instr"),
+        newIdentNode("uint16"),
+        newEmptyNode()  # default value
+      )
+    ),
+    newEmptyNode(),
+    newEmptyNode(),
+  )
+  var stmtList = newStmtList()
+
+  let opBit: uint16 = 1 shl op.ord
+
+  stmtList.add(nnkVarSection.newTree(
+    nnkIdentDefs.newTree(
+      newIdentNode("r0"),
+      newIdentNode("r1"),
+      newIdentNode("r2"),
+      newIdentNode("RegisterIdx"),
+      newEmptyNode()
+    ),
+    nnkIdentDefs.newTree(
+      newIdentNode("imm5"),
+      newIdentNode("immFlag"),
+      newIdentNode("uint16"),
+      newEmptyNode()
+    ),
+    nnkIdentDefs.newTree(
+      newIdentNode("pcPlusOff"),
+      newIdentNode("basePlusOff"),
+      newIdentNode("uint16"),
+      newEmptyNode()
+    )
+  ))
+  
+  if (0x4EEE and opBit) != 0:
+    stmtList.add quote do:
+      r0 = (instr shr 9) and 0x7
+  if (0x12F3 and opBit) != 0:
+    stmtList.add quote do:
+      r1 = (instr shr 6) and 0x7
+  if (0x0022 and opBit) != 0:
+    stmtList.add quote do:
+      immFlag = (instr shr 5) and 0x1
+      if immFlag != 0:
+        imm5 = signExtend(instr and 0x1F, 5)
+      else:
+        r2 = instr and 0x7
+  if (0x00C0 and opBit) != 0: # base + offset
+    stmtList.add quote do:
+      basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
+  if (0x4C0D and opBit) != 0: # indirect address
+    stmtList.add quote do:
+      pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
+  if (0x0001 and opBit) != 0: # BR
+    stmtList.add quote do:
+      let cond: uint16 = (instr shr 9) and 0x7
+      if (cond and reg[rCond]) != 0:
+        reg[rPC] = pcPlusOff
+  if (0x0002 and opBit) != 0: # ADD
+    stmtList.add quote do:
+      if immFlag != 0:
+        reg[r0] = reg[r1] + imm5
+      else:
+        reg[r0] = reg[r1] + reg[r2]
+  if (0x0020 and opBit) != 0: # AND
+    stmtList.add quote do:
+      if immFlag != 0:
+        reg[r0] = reg[r1] and imm5
+      else:
+        reg[r0] = reg[r1] and reg[r2]
+  if (0x0200 and opBit) != 0: # NOT
+    stmtList.add quote do:
+      reg[r0] = not reg[r1]
+  if (0x1000 and opBit) != 0: # JMP
+    stmtList.add quote do:
+      reg[rPC] = reg[r1]
+  if (0x0010 and opBit) != 0: # JSR
+    stmtList.add quote do:
+      let longFlag: uint16 = (instr shr 11) and 0x1
+      reg[rR7] = reg[rPC]
+      if longFlag != 0:
+        pcPlusOff = reg[rPC] + signExtend(instr and 0x7FF, 11)
+        reg[rPC] = pcPlusOff
+      else:
+        reg[rPC] = reg[r1]
+  if (0x0004 and opBit) != 0:
+    stmtList.add quote do:
+      reg[r0] = memRead(pcPlusOff)  # LD
+  if (0x0400 and opBit) != 0:
+    stmtList.add quote do:
+      reg[r0] = memRead(memRead(pcPlusOff))  # LDI
+  if (0x0040 and opBit) != 0:
+    stmtList.add quote do:
+      reg[r0] = memRead(basePlusOff)  # LDR
+  if (0x4000 and opBit) != 0:
+    stmtList.add quote do:
+      reg[r0] = pcPlusOff  # LEA
+  if (0x0008 and opBit) != 0:
+    stmtList.add quote do:
+      memWrite(pcPlusOff, reg[r0])  # ST
+  if (0x0800 and opBit) != 0:
+    stmtList.add quote do:
+      memWrite(memRead(pcPlusOff), reg[r0])  # STI
+  if (0x0080 and opBit) != 0:
+    stmtList.add quote do:
+      memWrite(basePlusOff, reg[r0])  # STR
+  if (0x8000 and opBit) != 0: # TRAP
+    stmtList.add quote do:
+      handleTrap(instr)
+  # if (0x0100 and opBit) != 0: # RTI
+  #   discard
+  if (0x4666 and opBit) != 0:
+    stmtList.add quote do:
+      updateFlags(r0)
+  
+  result.add(stmtList)
+  # echo result.repr
+
+const opTable = [
+  ins(opBr),
+  ins(opAdd),
+  ins(opLd),
+  ins(opSt),
+  ins(opJsr),
+  ins(opAnd),
+  ins(opLdr),
+  ins(opStr),
+  ins(opRti),
+  ins(opNot),
+  ins(opLdi),
+  ins(opSti),
+  ins(opJmp),
+  ins(opRes),
+  ins(opLea),
+  ins(opTrap),
+]
+
 # main
 
 proc main() =
@@ -154,7 +347,6 @@ proc main() =
   let pcStart = 0x3000
   reg[rPC] = pcStart
 
-  var running = true
   while running:
     # fetch
     let
@@ -162,155 +354,7 @@ proc main() =
       op = Opcode(instr shr 12)
     inc reg[rPC]
 
-    case op
-    of opAdd:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7  # dest register (DR)
-        r1: RegisterIdx = (instr shr 6) and 0x7  # first operand (SR1)
-        immFlag: bool = ((instr shr 5) and 0x1) != 0 # whether we are in immediate mode
-      if immFlag:
-        let imm5: uint16 = signExtend(instr and 0x1F, 5)
-        reg[r0] = reg[r1] + imm5
-      else:
-        let r2: RegisterIdx = instr and 0x7
-        reg[r0] = reg[r1] + reg[r2]
-      updateFlags(r0)
-
-    of opAnd:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        r1: RegisterIdx = (instr shr 6) and 0x7
-        immFlag: bool = ((instr shr 5) and 0x1) != 0
-      if immFlag:
-        let imm5: uint16 = signExtend(instr and 0x1F, 5)
-        reg[r0] = reg[r1] and imm5
-      else:
-        let r2: RegisterIdx = instr and 0x7
-        reg[r0] = reg[r1] and reg[r2]
-      updateFlags(r0)
-
-    of opNot:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        r1: RegisterIdx = (instr shr 6) and 0x7
-      reg[r0] = not reg[r1]
-      updateFlags(r0)
-
-    of opBr:
-      let
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-        condFlag: uint16 = (instr shr 9) and 0x7
-      if (condFlag and reg[rCond]) != 0:
-        reg[rPC] += pcOffset
-
-    of opJmp: # also handles RET
-      let r1: RegisterIdx = (instr shr 6) and 0x7
-      reg[rPC] = reg[r1]
-
-    of opJsr:
-      let longFlag: bool = ((instr shr 11) and 0x1) != 0
-      reg[rR7] = reg[rPC]
-      if longFlag:
-        let longPcOffset: uint16 = signExtend(instr and 0x7FF, 11)
-        reg[rPC] += longPcOffset  # JSR
-      else:
-        let r1: RegisterIdx = (instr shr 6) and 0x7
-        reg[rPC] = reg[r1]  # JSRR
-
-    of opLd:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-      reg[r0] = memRead(reg[rPC] + pcOffset)
-      updateFlags(r0)
-
-    of opLdi:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-      reg[r0] = memRead(memRead(reg[rPC] + pcOffset))
-      updateFlags(r0)
-
-    of opLdr:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        r1: RegisterIdx = (instr shr 6) and 0x7
-        offset: uint16 = signExtend(instr and 0x3F, 6)
-      reg[r0] = memRead(reg[r1] + offset)
-      updateFlags(r0)
-
-    of opLea:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-      reg[r0] = reg[rPC] + pcOffset
-      updateFlags(r0)
-
-    of opSt:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-      memWrite(reg[rPC] + pcOffset, reg[r0])
-
-    of opSti:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        pcOffset: uint16 = signExtend(instr and 0x1FF, 9)
-      memWrite(memRead(reg[rPC] + pcOffset), reg[r0])
-
-    of opStr:
-      let
-        r0: RegisterIdx = (instr shr 9) and 0x7
-        r1: RegisterIdx = (instr shr 6) and 0x7
-        offset: uint16 = signExtend(instr and 0x3F, 6)
-      memWrite(reg[r1] + offset, reg[r0])
-
-    of opTrap:
-      let trapCode = Trapcode(instr and 0xFF)
-
-      case trapCode
-      of trapGetc:
-        reg[rR0] = stdin.readChar().uint16
-
-      of trapOut:
-        stdout.write(reg[rR0].char)
-        stdout.flushFile()
-
-      of trapPuts:
-        # one char per word
-        var p = reg[rR0]
-        while memory[p] != 0:
-          stdout.write(memory[p].char)
-          inc p
-        stdout.flushFile()
-
-      of trapIn:
-        stdout.writeLine("Enter a character: ")
-        let c = stdin.readChar()
-        stdout.write(c)
-        reg[rR0] = c.uint16
-
-      of trapPutsp:
-        # one char per byte (two bytes per word)
-        # here we need to swap back to big endian
-        var p = reg[rR0]
-        while memory[p] != 0:
-          let
-            char1 = (memory[p] and 0xFF).char
-            char2 = (memory[p] shr 8).char
-          stdout.write(char1)
-          if char2 != '\0':
-            stdout.write(char2)
-          inc p
-        stdout.flushFile()
-
-      of trapHalt:
-        stdout.write("HALT")
-        stdout.flushFile()
-        running = false
-
-    else:
-      raise newException(ValueError, "Invalid opcode " & $op)
+    opTable[op.ord](instr)
         
   # shutdown
   restoreInputBuffering()
