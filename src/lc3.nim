@@ -53,16 +53,16 @@ type
 
 # converters
 
-converter uint16ToRegisterIdx(x: uint16): RegisterIdx =
+converter uint16ToRegisterIdx(x: uint16): RegisterIdx {.inline.} =
   RegisterIdx(x)
 
-converter memoryMappedRegisterIdxToUInt16(x: MemoryMappedRegisterIdx): uint16 =
+converter memoryMappedRegisterIdxToUInt16(x: MemoryMappedRegisterIdx): uint16 {.inline.} =
   x.ord.uint16
 
-converter conditionFlagToUInt16(x: ConditionFlag): uint16 =
+converter conditionFlagToUInt16(x: ConditionFlag): uint16 {.inline.} =
   x.ord.uint16
 
-converter intToUInt16(x: int): uint16 =
+converter intToUInt16(x: int): uint16 {.inline.} =
   x.uint16
 
 # globals
