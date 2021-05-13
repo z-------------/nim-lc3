@@ -176,58 +176,58 @@ proc handleTrap(instr: uint16) =
 
 # instruction macro
 
-template ifOp(ops: varargs[Opcode]; body: untyped): untyped =
+template whenOp(ops: varargs[Opcode]; body: untyped): untyped =
   when ops.contains(op):
     body
 
 proc ins[op: static[Opcode]](instr: uint16) =
-  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     var r0 {.inject.}: RegisterIdx
-  ifOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
+  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
     var r1 {.inject.}: RegisterIdx
-  ifOp(opAdd, opAnd):
+  whenOp(opAdd, opAnd):
     var
       r2 {.inject.}: RegisterIdx
       imm5 {.inject.}: uint16
       immFlag {.inject.}: uint16
-  ifOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
+  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti):
     var pcPlusOff {.inject.}: uint16
-  ifOp(opLdr, opStr):
+  whenOp(opLdr, opStr):
     var basePlusOff {.inject.}: uint16
   
-  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea, opSt, opSti, opStr):
     r0 = (instr shr 9) and 0x7
-  ifOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
+  whenOp(opAdd, opAnd, opNot, opJmp, opJsr, opLdr, opStr):
     r1 = (instr shr 6) and 0x7
-  ifOp(opAdd, opAnd):
+  whenOp(opAdd, opAnd):
     immFlag = (instr shr 5) and 0x1
     if immFlag != 0:
       imm5 = signExtend(instr and 0x1F, 5)
     else:
       r2 = instr and 0x7
-  ifOp(opLdr, opStr): # base + offset
+  whenOp(opLdr, opStr): # base + offset
     basePlusOff = reg[r1] + signExtend(instr and 0x3F, 6)
-  ifOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti): # indirect address
+  whenOp(opBr, opJsr, opLd, opLdi, opLea, opSt, opSti): # indirect address
     pcPlusOff = reg[rPC] + signExtend(instr and 0x1FF, 9)
-  ifOp(opBr): # BR
+  whenOp(opBr): # BR
     let cond: uint16 = (instr shr 9) and 0x7
     if (cond and reg[rCond]) != 0:
       reg[rPC] = pcPlusOff
-  ifOp(opAdd): # ADD
+  whenOp(opAdd): # ADD
     if immFlag != 0:
       reg[r0] = reg[r1] + imm5
     else:
       reg[r0] = reg[r1] + reg[r2]
-  ifOp(opAnd): # AND
+  whenOp(opAnd): # AND
     if immFlag != 0:
       reg[r0] = reg[r1] and imm5
     else:
       reg[r0] = reg[r1] and reg[r2]
-  ifOp(opNot): # NOT
+  whenOp(opNot): # NOT
     reg[r0] = not reg[r1]
-  ifOp(opJmp): # JMP
+  whenOp(opJmp): # JMP
     reg[rPC] = reg[r1]
-  ifOp(opJsr): # JSR
+  whenOp(opJsr): # JSR
     let longFlag: uint16 = (instr shr 11) and 0x1
     reg[rR7] = reg[rPC]
     if longFlag != 0:
@@ -235,25 +235,25 @@ proc ins[op: static[Opcode]](instr: uint16) =
       reg[rPC] = pcPlusOff
     else:
       reg[rPC] = reg[r1]
-  ifOp(opLd): # LD
+  whenOp(opLd): # LD
     reg[r0] = memRead(pcPlusOff)
-  ifOp(opLdi): # LDI
+  whenOp(opLdi): # LDI
     reg[r0] = memRead(memRead(pcPlusOff))
-  ifOp(opLdr): # LDR
+  whenOp(opLdr): # LDR
     reg[r0] = memRead(basePlusOff)
-  ifOp(opLea): # LEA
+  whenOp(opLea): # LEA
     reg[r0] = pcPlusOff
-  ifOp(opSt): # ST
+  whenOp(opSt): # ST
     memWrite(pcPlusOff, reg[r0])
-  ifOp(opSti): # STI
+  whenOp(opSti): # STI
     memWrite(memRead(pcPlusOff), reg[r0])
-  ifOp(opStr): # STR
+  whenOp(opStr): # STR
     memWrite(basePlusOff, reg[r0])
-  ifOp(opTrap): # TRAP
+  whenOp(opTrap): # TRAP
     handleTrap(instr)
-  # ifOp(0x0100): # RTI
+  # whenOp(0x0100): # RTI
   #   discard
-  ifOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
+  whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
     updateFlags(r0)
 
 const opTable = [
