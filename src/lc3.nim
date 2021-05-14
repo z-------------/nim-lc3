@@ -1,5 +1,6 @@
 import std/os
 from std/strutils import toHex
+import std/macros
 
 when defined(windows):
   import ./platform/win
@@ -256,24 +257,15 @@ proc ins[op: static[Opcode]](instr: uint16) =
   whenOp(opAdd, opAnd, opNot, opLd, opLdi, opLdr, opLea):
     updateFlags(r0)
 
-const opTable = [
-  ins[opBr],
-  ins[opAdd],
-  ins[opLd],
-  ins[opSt],
-  ins[opJsr],
-  ins[opAnd],
-  ins[opLdr],
-  ins[opStr],
-  ins[opRti],
-  ins[opNot],
-  ins[opLdi],
-  ins[opSti],
-  ins[opJmp],
-  ins[opRes],
-  ins[opLea],
-  ins[opTrap],
-]
+macro generateIns(): untyped =
+  result = quote: []
+  for op in Opcode:
+    let
+      lit = newLit(op)
+      node = quote: ins[`lit`]
+    result.add(node)
+
+const opTable = generateIns()
 
 # main
 
